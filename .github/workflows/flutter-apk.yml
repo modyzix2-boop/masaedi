@@ -22,15 +22,19 @@ jobs:
           sed -i 's/android:label="masaedi_ai"/android:label="مساعدي"/' android/app/src/main/AndroidManifest.xml
           sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <application|' android/app/src/main/AndroidManifest.xml
           grep -n "android:label\|INTERNET" android/app/src/main/AndroidManifest.xml
+      - name: add markdown package (latest compatible)
+        run: |
+          cd flutter_app
+          flutter pub add flutter_markdown_plus
       - name: build release apk
         run: |
           cd flutter_app
           flutter pub get
           flutter build apk --release --split-per-abi
-      - run: cp flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk masaedi-native-v1.0.0.apk
+      - run: cp flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk masaedi-native-v1.1.0.apk
       - uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: native-v1.0.0
-          name: "مساعدي ناتيف v1.0.0"
-          files: masaedi-native-v1.0.0.apk
+          tag_name: native-v1.1.0
+          name: "مساعدي ناتيف v1.1.0"
+          files: masaedi-native-v1.1.0.apk
