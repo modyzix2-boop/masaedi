@@ -1,1 +1,1 @@
-{"chats":{"c1795288570283":{"id":"c1795288570283","title":"hi","msgs":[{"r":"u","c":"hi"},{"r":"a","c":"\n\nHi! How can I help you today?","model":"claude-opus-4-5"}],"updated":1795288578039}}}
+{"chats":{"c1795288570283":{"id":"c1795288570283","title":"hi","msgs":[{"r":"u","c":"hi"},{"r":"a","c":"\n\nHi! How can I help you today?","model":"claude-opus-4-5"},{"r":"u","c":"انت مموذج ايه"},{"r":"a","c":"\n\nأنا **Qwen**، نموذج ذكاء اصطناعي طوّرته مختبرات تونجي التابعة لمجموعة Alibaba. 🤖\n\nإزاي أقدر أساعدك النهارده؟","model":"claude-opus-4-5"}],"updated":1795288625389}}}
