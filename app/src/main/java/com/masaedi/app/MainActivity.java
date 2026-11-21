@@ -13,6 +13,7 @@ import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebView;
+import android.webkit.WebSettings;
 import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
@@ -56,7 +57,9 @@ public class MainActivity extends Activity {
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 7);
         }
-        w.loadUrl("https://freellm-router.onrender.com/ar.html");
+        w.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
+        w.clearCache(true);
+        w.loadUrl("https://freellm-router.onrender.com/ar.html?v=" + System.currentTimeMillis());
         setContentView(w);
     }
 
