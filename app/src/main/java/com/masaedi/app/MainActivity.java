@@ -59,7 +59,21 @@ public class MainActivity extends Activity {
         }
         w.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
         w.clearCache(true);
-        w.loadUrl("https://freellm-router.onrender.com/ar.html?v=" + System.currentTimeMillis());
+        final WebView fw = w;
+        final android.os.Handler h = new android.os.Handler();
+        final Runnable bootCheck = new Runnable() {
+            @Override public void run() {
+                fw.evaluateJavascript("window.__BOOT_OK===true", v -> {
+                    if (!"true".equals(v)) {
+                        fw.clearCache(true);
+                        fw.loadUrl("https://freellm-router.onrender.com/ar.html?v=" + System.currentTimeMillis());
+                        h.postDelayed(this, 25000);
+                    }
+                });
+            }
+        };
+        fw.loadUrl("https://freellm-router.onrender.com/ar.html?v=" + System.currentTimeMillis());
+        h.postDelayed(bootCheck, 25000);
         setContentView(w);
     }
 
