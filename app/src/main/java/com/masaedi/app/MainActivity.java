@@ -61,10 +61,23 @@ public class MainActivity extends Activity {
         w.clearCache(true);
         final WebView fw = w;
         final android.os.Handler h = new android.os.Handler();
+        final int[] tries = {0};
         final Runnable bootCheck = new Runnable() {
             @Override public void run() {
                 fw.evaluateJavascript("window.__BOOT_OK===true", v -> {
                     if (!"true".equals(v)) {
+                        tries[0]++;
+                        android.widget.Toast.makeText(MainActivity.this, "بنعيد تحميل الصفحة... (" + tries[0] + ")", android.widget.Toast.LENGTH_SHORT).show();
+                        if (tries[0] == 3) {
+                            String wv = "unknown";
+                            try { android.content.pm.PackageInfo pi = android.webkit.WebView.getCurrentWebViewPackage(); wv = pi.packageName + " " + pi.versionName; } catch (Exception ignored) {}
+                            final String msg = "المتصفح الداخلي مش بيشغّل الصفحة على جهازك.\n\nWebView: " + wv + "\nJS probe: " + (v == null ? "null (dead)" : v) + "\n\nابعت المعلومات دي للدعم.";
+                            new android.app.AlertDialog.Builder(MainActivity.this)
+                                .setTitle("تشخيص")
+                                .setMessage(msg)
+                                .setPositiveButton("حسناً", null)
+                                .show();
+                        }
                         fw.clearCache(true);
                         fw.loadUrl("https://freellm-router.onrender.com/ar.html?v=" + System.currentTimeMillis());
                         h.postDelayed(this, 25000);
