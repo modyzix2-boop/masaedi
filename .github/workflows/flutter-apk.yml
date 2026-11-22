@@ -21,20 +21,22 @@ jobs:
           cd flutter_app
           sed -i 's/android:label="masaedi_ai"/android:label="مساعدي"/' android/app/src/main/AndroidManifest.xml
           sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <application|' android/app/src/main/AndroidManifest.xml
+          sed -i 's|<application|<uses-permission android:name="android.permission.RECORD_AUDIO"/>\n    <application|' android/app/src/main/AndroidManifest.xml
+          sed -i 's|<application|<uses-permission android:name="android.permission.CAMERA"/>\n    <application|' android/app/src/main/AndroidManifest.xml
           grep -n "android:label\|INTERNET" android/app/src/main/AndroidManifest.xml
-      - name: add markdown package (latest compatible)
+      - name: add packages (latest compatible)
         run: |
           cd flutter_app
-          flutter pub add flutter_markdown_plus
+          flutter pub add flutter_markdown_plus image_picker speech_to_text
       - name: build release apk
         run: |
           cd flutter_app
           flutter pub get
           flutter build apk --release --split-per-abi
-      - run: cp flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk masaedi-native-v1.4.0.apk
+      - run: cp flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk masaedi-native-v1.5.0.apk
       - uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: native-v1.4.0
-          name: "مساعدي ناتيف v1.4.0"
-          files: masaedi-native-v1.4.0.apk
+          tag_name: native-v1.5.0
+          name: "مساعدي ناتيف v1.5.0"
+          files: masaedi-native-v1.5.0.apk

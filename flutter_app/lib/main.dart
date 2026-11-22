@@ -7,6 +7,8 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:speech_to_text/speech_to_text.dart';
 
 const String kBase = 'https://masaedi-web.onrender.com';
 const Color kTeal = Color(0xFF0D9488);
@@ -152,7 +154,20 @@ class Api {
         .take(19)
         .toList()
         .reversed
-        .map((m) => {'role': m['r'] == 'u' ? 'user' : 'assistant', 'content': (m['c'] ?? '').toString()})
+        .map((m) {
+          final c = (m['c'] ?? '').toString();
+          final img = m['img'];
+          if (img is String && img.isNotEmpty) {
+            return {
+              'role': m['r'] == 'u' ? 'user' : 'assistant',
+              'content': [
+                {'type': 'text', 'text': c.isEmpty ? 'صف الصورة دي بالتفصيل' : c},
+                {'type': 'image_url', 'image_url': {'url': img}},
+              ]
+            };
+          }
+          return {'role': m['r'] == 'u' ? 'user' : 'assistant', 'content': c};
+        })
         .toList();
     req.body = jsonEncode({
       'model': model,
@@ -671,6 +686,11 @@ class _ChatScreenState extends State<ChatScreen> {
     'aya-expanse-32b','aya-vision-32b','command-r','llama-guard-3-8b','gemma-2b-it-lora',
     'llama-prompt-guard-2-22m','llama-prompt-guard-2-86m'
   };
+  // vision-capable catalog ids (image input): messages with attachments route here
+  static const visionIds = {
+    'llama-3.2-11b-vision','qwen2.5-vl-72b','command-a-vision','aya-vision-32b',
+    'nemotron-3.5-super-vl','moondream-3.1-9b-a2b'
+  };
   // aliases proven to serve a DIFFERENT model than the label, plus catalog phantoms (404): hidden
   static const hiddenIds = {
     'claude-opus-4-5','claude-sonnet-4-5','claude-haiku-4-5',
@@ -688,12 +708,20 @@ class _ChatScreenState extends State<ChatScreen> {
   bool loading = true;
   bool compareMode = false;
   final Set<String> compareSet = {'llama-3.3-70b-fp8-fast', 'gpt-oss-120b'};
+  String? attachedImg;
+  final picker = ImagePicker();
+  final speech = SpeechToText();
+  bool listening = false;
+  bool speechReady = false;
   late String title;
 
   @override
   void initState() {
     super.initState();
     title = widget.title;
+    speech.statusListener = (s) {
+      if ((s == 'done' || s == 'notListening') && mounted) setState(() => listening = false);
+    };
     Api.listModels().then((m) {
       if (mounted && m.isNotEmpty) setState(() => models = m);
     });
@@ -898,6 +926,59 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
 
+  Future<void> pickImage() async {
+    final src = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          ListTile(leading: const Icon(Icons.photo_library_outlined, color: kTeal), title: const Text('من المعرض'), onTap: () => Navigator.pop(ctx, ImageSource.gallery)),
+          ListTile(leading: const Icon(Icons.photo_camera_outlined, color: kTeal), title: const Text('من الكاميرا'), onTap: () => Navigator.pop(ctx, ImageSource.camera)),
+        ]),
+      ),
+    );
+    if (src == null) return;
+    try {
+      final x = await picker.pickImage(source: src, maxWidth: 1024, maxHeight: 1024, imageQuality: 80);
+      if (x == null) return;
+      final bytes = await x.readAsBytes();
+      final mime = x.mimeType ?? 'image/jpeg';
+      setState(() => attachedImg = 'data:$mime;base64,${base64Encode(bytes)}');
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الصورة ماتفتحتش، جرّب غيرها'), duration: Duration(seconds: 2)));
+    }
+  }
+
+  Future<void> toggleListen() async {
+    if (listening) {
+      await speech.stop();
+      if (mounted) setState(() => listening = false);
+      return;
+    }
+    if (!speechReady) {
+      try {
+        speechReady = await speech.initialize();
+      } catch (_) {
+        speechReady = false;
+      }
+    }
+    if (!speechReady) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('التعرف على الصوت مش متاح على الجهاز دلوقتي'), duration: Duration(seconds: 2)));
+      return;
+    }
+    setState(() => listening = true);
+    speech.listen(
+      localeId: 'ar_EG',
+      onResult: (r) {
+        if (mounted) {
+          inputC.text = r.recognizedWords;
+          inputC.selection = TextSelection.collapsed(offset: inputC.text.length);
+        }
+      },
+    );
+  }
+
   void openComparePicker() {
     showModalBottomSheet(
       context: context,
@@ -957,6 +1038,10 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> sendCompare() async {
     final text = inputC.text.trim();
     if (text.isEmpty || sending) return;
+    if (attachedImg != null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('المقارنة مش بتدعم صور دلوقتي، ابعتها في وضع عادي'), duration: Duration(seconds: 2)));
+      return;
+    }
     final sel = compareSet.where((id) => models.any((m) => m.id == id)).toList();
     if (sel.length < 2) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اختار نموذجين على الأقل من قائمة المقارنة'), duration: Duration(seconds: 2)));
@@ -1000,16 +1085,37 @@ class _ChatScreenState extends State<ChatScreen> {
     await Future.wait(futures);
     if (mounted) setState(() => sending = false);
     try {
-      await Api.putChat(widget.chatId, title, msgs);
+      final toSave = msgs.map((m) {
+        final c = Map<String, dynamic>.from(m);
+        if (c['img'] is String) {
+          c.remove('img');
+          c['hadImg'] = true;
+        }
+        return c;
+      }).toList();
+      await Api.putChat(widget.chatId, title, toSave);
     } catch (_) {}
   }
 
   Future<void> send() async {
     final text = inputC.text.trim();
-    if (text.isEmpty || sending) return;
+    final img = attachedImg;
+    if ((text.isEmpty && img == null) || sending) return;
+    var useModel = model;
+    if (img != null && !_ChatScreenState.visionIds.contains(model)) {
+      final v = models.where((m) => _ChatScreenState.visionIds.contains(m.id)).toList();
+      if (v.isEmpty) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('مفيش نموذج بيقرا الصور شغال دلوقتي، جرّب بعدين'), duration: Duration(seconds: 2)));
+        return;
+      }
+      useModel = v.first.id;
+    }
     inputC.clear();
     setState(() {
-      msgs.add({'r': 'u', 'c': text});
+      attachedImg = null;
+      final um = <String, dynamic>{'r': 'u', 'c': text};
+      if (img != null) um['img'] = img;
+      msgs.add(um);
       msgs.add({'r': 'a', 'c': ''});
       sending = true;
     });
@@ -1021,10 +1127,10 @@ class _ChatScreenState extends State<ChatScreen> {
     final buf = StringBuffer();
     String? served;
     try {
-      await for (final part in Api.streamChat(msgs.sublist(0, aiIdx), model, onServed: (sm) => served = sm)) {
+      await for (final part in Api.streamChat(msgs.sublist(0, aiIdx), useModel, onServed: (sm) => served = sm)) {
         buf.write(part);
         if (mounted) {
-          setState(() => msgs[aiIdx] = {'r': 'a', 'c': buf.toString(), 'model': model, 'served': served});
+          setState(() => msgs[aiIdx] = {'r': 'a', 'c': buf.toString(), 'model': useModel, 'served': served});
           _toBottom();
         }
       }
@@ -1036,7 +1142,15 @@ class _ChatScreenState extends State<ChatScreen> {
     }
     setState(() => sending = false);
     try {
-      await Api.putChat(widget.chatId, title, msgs);
+      final toSave = msgs.map((m) {
+        final c = Map<String, dynamic>.from(m);
+        if (c['img'] is String) {
+          c.remove('img');
+          c['hadImg'] = true;
+        }
+        return c;
+      }).toList();
+      await Api.putChat(widget.chatId, title, toSave);
     } catch (_) {}
   }
 
@@ -1143,11 +1257,36 @@ class _ChatScreenState extends State<ChatScreen> {
                     },
                   ),
           ),
+          if (attachedImg != null)
+            Container(
+              margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: kLine)),
+              child: Row(children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(base64Decode(attachedImg!.split(',').last), width: 44, height: 44, fit: BoxFit.cover),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(child: Text('الصورة هتتبعت مع الرسالة الجاية', style: TextStyle(fontSize: 12.5, color: Colors.black54))),
+                IconButton(icon: const Icon(Icons.close, size: 20), tooltip: 'شيل الصورة', onPressed: () => setState(() => attachedImg = null)),
+              ]),
+            ),
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
               child: Row(
                 children: [
+                  IconButton(
+                    icon: const Icon(Icons.image_outlined, color: kTealDark),
+                    tooltip: 'أرفق صورة',
+                    onPressed: sending ? null : pickImage,
+                  ),
+                  IconButton(
+                    icon: Icon(listening ? Icons.mic : Icons.mic_none, color: listening ? const Color(0xFFB3261E) : kTealDark),
+                    tooltip: listening ? 'وقف التسجيل' : 'اتكلم',
+                    onPressed: sending ? null : toggleListen,
+                  ),
                   Expanded(
                     child: TextField(
                       controller: inputC,
@@ -1236,8 +1375,30 @@ class _BubbleState extends State<Bubble> {
               crossAxisAlignment: CrossAxisAlignment.end,
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (isUser && widget.m['img'] is String)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 220),
+                        child: Image.memory(base64Decode((widget.m['img'] as String).split(',').last), fit: BoxFit.cover),
+                      ),
+                    ),
+                  ),
+                if (isUser && widget.m['hadImg'] == true)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 6),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.image_outlined, size: 16, color: Colors.white70),
+                      SizedBox(width: 6),
+                      Text('صورة مرفوعة', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                    ]),
+                  ),
                 if (text.isEmpty && widget.streaming)
                   const Padding(padding: EdgeInsets.symmetric(vertical: 8, horizontal: 4), child: PulsingDots(size: 8))
+                else if (isUser && text.isEmpty)
+                  const SizedBox.shrink()
                 else if (isUser)
                   Text(text, textAlign: TextAlign.right, style: const TextStyle(color: Colors.white, fontSize: 15.5, height: 1.55))
                 else
