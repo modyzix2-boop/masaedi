@@ -94,7 +94,7 @@ class Api {
       final d = jsonDecode(utf8.decode(r.bodyBytes));
       final out = <ModelInfo>[];
       for (final m in (d['data'] as List)) {
-        if (m['available'] == true) {
+        if (m['available'] == true && !_ChatScreenState.hiddenIds.contains(m['id'])) {
           out.add(ModelInfo(m['id'] as String, (m['name'] ?? m['id']) as String));
         }
       }
@@ -110,7 +110,7 @@ class Api {
     return jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
   }
 
-  static Stream<String> streamChat(List<Map<String, dynamic>> msgs, String model) async* {
+  static Stream<String> streamChat(List<Map<String, dynamic>> msgs, String model, {void Function(String served)? onServed}) async* {
     final req = http.Request('POST', Uri.parse('$kBase/v1/chat/completions'));
     req.headers.addAll(headers);
     final wire = msgs
@@ -147,6 +147,8 @@ class Api {
             if (data == '[DONE]') return;
             try {
               final j = jsonDecode(data);
+              final rm = j['model'];
+              if (rm is String && onServed != null) onServed(rm);
               final delta = j['choices']?[0]?['delta'];
               final c = delta?['content'];
               if (c is String && c.isNotEmpty) yield c;
@@ -404,9 +406,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
       appBar: AppBar(
         title: Text('أهلاً يا ${Api.name}', style: const TextStyle(fontWeight: FontWeight.w700)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.insights_outlined),
-            tooltip: 'لوحة التحكم',
+          TextButton.icon(
+            icon: const Icon(Icons.insights_outlined, size: 20, color: kTeal),
+            label: const Text('لوحة التحكم', style: TextStyle(color: kTeal, fontWeight: FontWeight.w700, fontSize: 13)),
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DashboardScreen())),
           ),
           IconButton(
@@ -611,7 +613,25 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  static const favIds = ['auto', 'fusion', 'claude-opus-4-5', 'claude-sonnet-4-5'];
+  static const favIds = ['auto', 'fusion', 'llama-3.3-70b-fp8-fast', 'gpt-oss-120b'];
+  // probe-verified identities (2026-11-22): served model matches the label family
+  static const verifiedIds = {
+    'qwen3.8-27b','gpt-oss-120b','nemotron-3.5-super-vl','north-mini-code','nemotron-3-ultra-550b',
+    'kilo-auto','qwen3.5-9b','free-router','nemotron-3.5-lightning','nemotron-3-nano-30b-reasoning',
+    'nemotron-3-nano-omni-reasoning','llama-3.3-70b-fp8-fast','llama-4-scout','command-a-vision',
+    'mistral-small-3.1-24b','qwen2.5-coder-32b','llama-3.2-3b','qwen3guard-gen-8b','qwen3guard-gen-0.6b',
+    'gemma-sea-lion-v4-27b','allam-2-7b','command-r-2','granite-4.0-h-micro','mistral-7b-instruct-v0.2-lora',
+    'aya-expanse-32b','aya-vision-32b','command-r','llama-guard-3-8b','gemma-2b-it-lora',
+    'llama-prompt-guard-2-22m','llama-prompt-guard-2-86m'
+  };
+  // aliases proven to serve a DIFFERENT model than the label, plus catalog phantoms (404): hidden
+  static const hiddenIds = {
+    'claude-opus-4-5','claude-sonnet-4-5','claude-haiku-4-5',
+    'dots3-note-preview','gemini-2.5-flash','gemini-2.5-flash-lite','nemotron-3-120b','qwq-32b',
+    'deepseek-r1-distill-qwen-32b','llama-3.2-1b-instruct','llama-3.2-1b-unsloth','llama-3-2-1b-instruct',
+    'ctx65536-magidonia-24b-heretic','llama-2-7b-chat-lora','gemma-7b-it-lora','l3-8b-stheno-v3-2-q5-k-m',
+    'llava-1.5-7b','thedrummer-behemoth-128b-v3-q4-k-m','gemma-4-e4b-uncensored-aggressive'
+  };
   final inputC = TextEditingController();
   final scrollC = ScrollController();
   List<Map<String, dynamic>> msgs = [];
@@ -661,7 +681,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 Row(children: [
                   const Icon(Icons.hub_outlined, color: kTeal),
                   const SizedBox(width: 8),
-                  Text('${models.length} نموذج شغال دلوقتي', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                  Expanded(child: Text('${models.length} نموذج شغال — الأسماء المستعارة اتخفت', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
                 ]),
                 const SizedBox(height: 12),
                 TextField(
@@ -686,7 +706,11 @@ class _ChatScreenState extends State<ChatScreen> {
                       final sel = m.id == model;
                       return ListTile(
                         title: Text(m.id, style: TextStyle(fontWeight: sel ? FontWeight.w700 : FontWeight.w400), textDirection: TextDirection.ltr, textAlign: TextAlign.right),
-                        subtitle: m.id != m.name ? Text(m.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Colors.black45)) : null,
+                        subtitle: Text(
+                          _ChatScreenState.verifiedIds.contains(m.id) ? 'موثّق من السيرفر' : (m.id.startsWith('gemini') ? 'غير مؤكد — ممكن يكون Gemini حقيقي' : 'غير مؤكد'),
+                          style: TextStyle(fontSize: 11, color: _ChatScreenState.verifiedIds.contains(m.id) ? kTeal : Colors.black38),
+                          textAlign: TextAlign.right,
+                        ),
                         trailing: sel ? const Icon(Icons.check_circle, color: kTeal) : null,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         selected: sel,
@@ -722,11 +746,12 @@ class _ChatScreenState extends State<ChatScreen> {
     _toBottom();
     final aiIdx = msgs.length - 1;
     final buf = StringBuffer();
+    String? served;
     try {
-      await for (final part in Api.streamChat(msgs.sublist(0, aiIdx), model)) {
+      await for (final part in Api.streamChat(msgs.sublist(0, aiIdx), model, onServed: (sm) => served = sm)) {
         buf.write(part);
         if (mounted) {
-          setState(() => msgs[aiIdx] = {'r': 'a', 'c': buf.toString(), 'model': model});
+          setState(() => msgs[aiIdx] = {'r': 'a', 'c': buf.toString(), 'model': model, 'served': served});
           _toBottom();
         }
       }
@@ -906,10 +931,15 @@ class _BubbleState extends State<Bubble> {
                       horizontalRuleDecoration: const BoxDecoration(border: Border(top: BorderSide(color: kLine))),
                     ),
                   ),
-                if (!isUser && widget.m['model'] != null && text.isNotEmpty)
+                if (!isUser && text.isNotEmpty && (widget.m['served'] != null || widget.m['model'] != null))
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: Text(modelLabel(widget.m['model'].toString()), style: const TextStyle(fontSize: 10, color: Colors.black38), textDirection: TextDirection.ltr),
+                    child: Text(
+                      widget.m['served'] != null ? 'الرد الفعلي: ${widget.m['served']}' : modelLabel(widget.m['model'].toString()),
+                      style: const TextStyle(fontSize: 10, color: Colors.black38),
+                      textDirection: TextDirection.ltr,
+                      textAlign: TextAlign.left,
+                    ),
                   ),
               ],
             ),
