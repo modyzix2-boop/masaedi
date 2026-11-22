@@ -38,3 +38,8 @@
 
 ## API facts (masaedi-web.onrender.com)
 - GET /v1/models (328 catalog, availability flag), GET /v1/usage (requests/tokens/byPlatform/byKey/resetsAt), /v1/client/chats CRUD (shim), POST /v1/chat/completions (SSE stream, stream_options include_usage accepted, response model field = actual served model).
+
+## Repo hazards
+- .github/workflows/build.yml (build-apk) runs on EVERY push and re-uploads a stale legacy gradle debug APK over release tag v1.0.4. Ignore tag v1.0.4 or delete that workflow.
+- Workflow dispatch needs a branch/tag ref, not a raw SHA.
+- 2026-11-22 incident: a build ran while flutter-apk.yml still said v1.1.0 and overwrote the native-v1.1.0 asset with v1.2.0 bytes; restored by rebuilding v1.1.0 code from branch restore-v110 (deleted after). Always bump workflow tag+asset names in the SAME commit as the code change.
