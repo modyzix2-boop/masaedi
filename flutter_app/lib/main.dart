@@ -687,9 +687,42 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  static List<String> modelTags(String id) {
+    final l = id.toLowerCase();
+    final t = <String>[];
+    if (l.contains('coder') || l.contains('mini-code')) t.add('كود');
+    if (l.contains('vision') || l.contains('-vl') || l.contains('moondream')) t.add('تحليل الصور');
+    if (l.contains('reasoning') || l.contains('120b') || l.contains('397b') || l.contains('550b') || l.contains('behemoth')) t.add('مهام');
+    if (l.contains('aya') || l.contains('allam') || l.contains('arabic')) t.add('عربي');
+    if (l.contains('guard') || l.contains('safeguard')) t.add('أدوات');
+    if (t.isEmpty) t.add('حديث');
+    if (!t.contains('حديث') && (l.contains('it') || l.contains('instruct') || l.contains('chat'))) t.add('حديث');
+    return t;
+  }
+
+  static const tagOrder = ['كود', 'حديث', 'تحليل الصور', 'مهام', 'عربي', 'أدوات'];
+
+  static IconData tagIcon(String t) {
+    switch (t) {
+      case 'كود':
+        return Icons.code;
+      case 'تحليل الصور':
+        return Icons.image_outlined;
+      case 'مهام':
+        return Icons.psychology_outlined;
+      case 'عربي':
+        return Icons.translate;
+      case 'أدوات':
+        return Icons.build_outlined;
+      default:
+        return Icons.chat_bubble_outline;
+    }
+  }
+
   void openModelPicker() {
     final searchC = TextEditingController();
     String q = '';
+    String tagFilter = '';
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -697,10 +730,14 @@ class _ChatScreenState extends State<ChatScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) {
-          final filtered = models.where((m) => q.isEmpty || m.id.toLowerCase().contains(q.toLowerCase())).toList();
+          final filtered = models.where((m) {
+            if (q.isNotEmpty && !m.id.toLowerCase().contains(q.toLowerCase())) return false;
+            if (tagFilter.isNotEmpty && !modelTags(m.id).contains(tagFilter)) return false;
+            return true;
+          }).toList();
           return DraggableScrollableSheet(
             expand: false,
-            initialChildSize: 0.75,
+            initialChildSize: 0.8,
             maxChildSize: 0.95,
             builder: (_, sc) => Padding(
               padding: const EdgeInsets.all(16),
@@ -723,32 +760,112 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   onChanged: (v) => setS(() => q = v),
                 ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: ListView.builder(
-                    controller: sc,
-                    itemCount: filtered.length,
-                    itemBuilder: (_, i) {
-                      final m = filtered[i];
-                      final sel = m.id == model;
-                      return ListTile(
-                        title: Text(m.id, style: TextStyle(fontWeight: sel ? FontWeight.w700 : FontWeight.w400), textDirection: TextDirection.ltr, textAlign: TextAlign.right),
-                        subtitle: Text(
-                          _ChatScreenState.verifiedIds.contains(m.id) ? 'موثّق من السيرفر' : (m.id.startsWith('gemini') ? 'غير مؤكد — ممكن يكون Gemini حقيقي' : 'غير مؤكد'),
-                          style: TextStyle(fontSize: 11, color: _ChatScreenState.verifiedIds.contains(m.id) ? kTeal : Colors.black38),
-                          textAlign: TextAlign.right,
+                const SizedBox(height: 10),
+                SizedBox(
+                  height: 36,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: ChoiceChip(
+                          label: const Text('الكل', style: TextStyle(fontSize: 12.5)),
+                          selected: tagFilter.isEmpty,
+                          selectedColor: kTeal,
+                          labelStyle: TextStyle(color: tagFilter.isEmpty ? Colors.white : kInk, fontSize: 12.5),
+                          onSelected: (_) => setS(() => tagFilter = ''),
                         ),
-                        trailing: sel ? const Icon(Icons.check_circle, color: kTeal) : null,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        selected: sel,
-                        selectedTileColor: kTeal.withOpacity(0.08),
-                        onTap: () {
-                          setState(() => model = m.id);
-                          Navigator.pop(ctx);
-                        },
-                      );
-                    },
+                      ),
+                      ...tagOrder.map((t) => Padding(
+                            padding: const EdgeInsets.only(left: 6),
+                            child: ChoiceChip(
+                              avatar: Icon(tagIcon(t), size: 15, color: tagFilter == t ? Colors.white : kTealDark),
+                              label: Text(t),
+                              selected: tagFilter == t,
+                              selectedColor: kTeal,
+                              labelStyle: TextStyle(color: tagFilter == t ? Colors.white : kInk, fontSize: 12.5),
+                              onSelected: (_) => setS(() => tagFilter = tagFilter == t ? '' : t),
+                            ),
+                          )),
+                    ],
                   ),
+                ),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: filtered.isEmpty
+                      ? const Center(child: Text('مفيش نماذج مطابقة', style: TextStyle(color: Colors.black45)))
+                      : ListView.builder(
+                          controller: sc,
+                          itemCount: filtered.length,
+                          itemBuilder: (_, i) {
+                            final m = filtered[i];
+                            final sel = m.id == model;
+                            final verified = _ChatScreenState.verifiedIds.contains(m.id);
+                            final tags = modelTags(m.id);
+                            return Card(
+                              color: sel ? kTeal.withOpacity(0.07) : Colors.white,
+                              elevation: 0,
+                              margin: const EdgeInsets.only(bottom: 8),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                side: BorderSide(color: sel ? kTeal : kLine, width: sel ? 1.4 : 1),
+                              ),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: () {
+                                  setState(() => model = m.id);
+                                  Navigator.pop(ctx);
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                                    Row(children: [
+                                      Expanded(
+                                        child: Text(m.id,
+                                            style: TextStyle(fontWeight: sel ? FontWeight.w700 : FontWeight.w600, fontSize: 14.5, fontFamily: 'monospace'),
+                                            textDirection: TextDirection.ltr,
+                                            textAlign: TextAlign.right),
+                                      ),
+                                      if (verified)
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(color: kTeal.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                                          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                                            Icon(Icons.verified, size: 13, color: kTeal),
+                                            SizedBox(width: 3),
+                                            Text('موثّق', style: TextStyle(fontSize: 10.5, color: kTeal, fontWeight: FontWeight.w700)),
+                                          ]),
+                                        ),
+                                      if (sel) ...[const SizedBox(width: 6), const Icon(Icons.check_circle, color: kTeal, size: 20)],
+                                    ]),
+                                    const SizedBox(height: 8),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 4,
+                                      children: tags
+                                          .map((t) => Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                                decoration: BoxDecoration(color: kBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: kLine)),
+                                                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                                  Icon(tagIcon(t), size: 12, color: kTealDark),
+                                                  const SizedBox(width: 4),
+                                                  Text(t, style: const TextStyle(fontSize: 11, color: kInk)),
+                                                ]),
+                                              ))
+                                          .toList(),
+                                    ),
+                                    if (!verified)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 6),
+                                        child: Text(m.id.startsWith('gemini') ? 'غير مؤكد — ممكن يكون Gemini حقيقي' : 'الاسم غير مؤكد من السيرفر',
+                                            style: const TextStyle(fontSize: 10.5, color: Colors.black38), textAlign: TextAlign.right),
+                                      ),
+                                  ]),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                 ),
               ]),
             ),
@@ -757,6 +874,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
+
 
   Future<void> send() async {
     final text = inputC.text.trim();
