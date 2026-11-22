@@ -33,10 +33,10 @@ jobs:
           cd flutter_app
           flutter pub get
           flutter build apk --release --split-per-abi
-      - run: cp flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk masaedi-native-v1.5.0.apk
+      - run: cp flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk masaedi-native-v1.6.0.apk
       - uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: native-v1.5.0
-          name: "مساعدي ناتيف v1.5.0"
-          files: masaedi-native-v1.5.0.apk
+          tag_name: native-v1.6.0
+          name: "مساعدي ناتيف v1.6.0"
+          files: masaedi-native-v1.6.0.apk

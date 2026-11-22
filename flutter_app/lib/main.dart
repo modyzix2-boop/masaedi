@@ -78,9 +78,9 @@ class Api {
     return jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
   }
 
-  static Future<void> putChat(String id, String title, List<Map<String, dynamic>> msgs) async {
+  static Future<void> putChat(String id, String title, List<Map<String, dynamic>> msgs, {String skill = ''}) async {
     await http
-        .post(Uri.parse('$kBase/v1/client/chats/$id'), headers: headers, body: jsonEncode({'title': title, 'msgs': msgs}))
+        .post(Uri.parse('$kBase/v1/client/chats/$id'), headers: headers, body: jsonEncode({'title': title, 'msgs': msgs, 'skill': skill}))
         .timeout(const Duration(seconds: 90));
   }
 
@@ -144,7 +144,7 @@ class Api {
     return jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
   }
 
-  static Stream<String> streamChat(List<Map<String, dynamic>> msgs, String model, {void Function(String served)? onServed}) async* {
+  static Stream<String> streamChat(List<Map<String, dynamic>> msgs, String model, {void Function(String served)? onServed, String? system}) async* {
     final req = http.Request('POST', Uri.parse('$kBase/v1/chat/completions'));
     req.headers.addAll(headers);
     final wire = msgs
@@ -169,9 +169,10 @@ class Api {
           return {'role': m['r'] == 'u' ? 'user' : 'assistant', 'content': c};
         })
         .toList();
+    final body = (system != null && system.isNotEmpty) ? [{'role': 'system', 'content': system}, ...wire] : wire;
     req.body = jsonEncode({
       'model': model,
-      'messages': wire,
+      'messages': body,
       'stream': true,
       'stream_options': {'include_usage': true},
     });
@@ -708,6 +709,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool loading = true;
   bool compareMode = false;
   final Set<String> compareSet = {'llama-3.3-70b-fp8-fast', 'gpt-oss-120b'};
+  SkillPack? activeSkill;
   String? attachedImg;
   final picker = ImagePicker();
   final speech = SpeechToText();
@@ -722,6 +724,7 @@ class _ChatScreenState extends State<ChatScreen> {
     speech.statusListener = (s) {
       if ((s == 'done' || s == 'notListening') && mounted) setState(() => listening = false);
     };
+    Skills.load();
     Api.listModels().then((m) {
       if (mounted && m.isNotEmpty) setState(() => models = m);
     });
@@ -730,6 +733,11 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         msgs = ((c['msgs'] as List?) ?? []).cast<Map<String, dynamic>>();
         title = c['title']?.toString() ?? title;
+        final sk = c['skill']?.toString() ?? '';
+        if (sk.isNotEmpty) {
+          final m = Skills.all.where((x) => x.id == sk);
+          if (m.isNotEmpty) activeSkill = m.first;
+        }
         loading = false;
       });
     }).catchError((_) {
@@ -926,6 +934,83 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
 
+  void openSkills() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.7,
+        maxChildSize: 0.95,
+        builder: (_, sc) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(children: [
+            const Row(children: [
+              Icon(Icons.psychology_outlined, color: kTeal),
+              SizedBox(width: 8),
+              Expanded(child: Text('المهارات', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700))),
+            ]),
+            const SizedBox(height: 4),
+            const Text('المهارة بتظبط طريقة رد النموذج في المحادثة دي بس', style: TextStyle(fontSize: 12.5, color: Colors.black45)),
+            const SizedBox(height: 12),
+            Expanded(
+              child: ListView(
+                controller: sc,
+                children: [
+                  if (activeSkill != null)
+                    ListTile(
+                      leading: const Icon(Icons.block, color: Color(0xFFB3261E)),
+                      title: const Text('من غير مهارة', style: TextStyle(fontWeight: FontWeight.w700)),
+                      onTap: () {
+                        setState(() => activeSkill = null);
+                        Navigator.pop(ctx);
+                      },
+                    ),
+                  ...Skills.all.map((s) {
+                    final sel = activeSkill?.id == s.id;
+                    return Card(
+                      color: sel ? kTeal.withOpacity(0.07) : Colors.white,
+                      elevation: 0,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: sel ? kTeal : kLine)),
+                      child: ListTile(
+                        leading: Container(
+                          width: 40, height: 40,
+                          decoration: BoxDecoration(color: kTeal.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                          child: Icon(s.icon, color: kTealDark, size: 21),
+                        ),
+                        title: Text(s.name, style: const TextStyle(fontWeight: FontWeight.w700)),
+                        subtitle: Text(s.desc, style: const TextStyle(fontSize: 12, color: Colors.black54), maxLines: 2, overflow: TextOverflow.ellipsis),
+                        trailing: sel ? const Icon(Icons.check_circle, color: kTeal) : null,
+                        onTap: () {
+                          applySkill(s);
+                          Navigator.pop(ctx);
+                        },
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  void applySkill(SkillPack s) {
+    setState(() => activeSkill = s);
+    final pref = s.prefer.where((id) => models.any((m) => m.id == id)).toList();
+    if (pref.isNotEmpty && model != pref.first && !sending) {
+      setState(() => model = pref.first);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('مهارة ${s.name} شغالة — رشحنا لك نموذج ${modelLabel(pref.first)}'), duration: const Duration(seconds: 2)));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('مهارة ${s.name} شغالة في المحادثة دي'), duration: const Duration(seconds: 1)));
+    }
+  }
+
   Future<void> pickImage() async {
     final src = await showModalBottomSheet<ImageSource>(
       context: context,
@@ -1069,7 +1154,7 @@ class _ChatScreenState extends State<ChatScreen> {
         final buf = StringBuffer();
         String? served;
         try {
-          await for (final part in Api.streamChat(List.of(msgs.sublist(0, ctxEnd)), mid, onServed: (sm) => served = sm)) {
+          await for (final part in Api.streamChat(List.of(msgs.sublist(0, ctxEnd)), mid, onServed: (sm) => served = sm, system: activeSkill?.prompt)) {
             buf.write(part);
             if (mounted) setState(() => msgs[idx] = {'r': 'a', 'c': buf.toString(), 'model': mid, 'grp': grp, 'art': true, 'served': served});
           }
@@ -1093,7 +1178,7 @@ class _ChatScreenState extends State<ChatScreen> {
         }
         return c;
       }).toList();
-      await Api.putChat(widget.chatId, title, toSave);
+      await Api.putChat(widget.chatId, title, toSave, skill: activeSkill?.id ?? '');
     } catch (_) {}
   }
 
@@ -1127,7 +1212,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final buf = StringBuffer();
     String? served;
     try {
-      await for (final part in Api.streamChat(msgs.sublist(0, aiIdx), useModel, onServed: (sm) => served = sm)) {
+      await for (final part in Api.streamChat(msgs.sublist(0, aiIdx), useModel, onServed: (sm) => served = sm, system: activeSkill?.prompt)) {
         buf.write(part);
         if (mounted) {
           setState(() => msgs[aiIdx] = {'r': 'a', 'c': buf.toString(), 'model': useModel, 'served': served});
@@ -1150,7 +1235,7 @@ class _ChatScreenState extends State<ChatScreen> {
         }
         return c;
       }).toList();
-      await Api.putChat(widget.chatId, title, toSave);
+      await Api.putChat(widget.chatId, title, toSave, skill: activeSkill?.id ?? '');
     } catch (_) {}
   }
 
@@ -1188,6 +1273,11 @@ class _ChatScreenState extends State<ChatScreen> {
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
         actions: [
           IconButton(
+            icon: Icon(Icons.psychology_outlined, color: activeSkill != null ? kTeal : Colors.black45),
+            tooltip: 'المهارات',
+            onPressed: sending ? null : openSkills,
+          ),
+          IconButton(
             icon: Icon(Icons.view_column_outlined, color: compareMode ? kTeal : Colors.black45),
             tooltip: 'وضع المقارنة',
             onPressed: sending ? null : () => setState(() => compareMode = !compareMode),
@@ -1202,6 +1292,16 @@ class _ChatScreenState extends State<ChatScreen> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               children: [
+                if (activeSkill != null)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: Chip(
+                      avatar: Icon(activeSkill!.icon, size: 15, color: kTealDark),
+                      label: Text(activeSkill!.name, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: kTealDark)),
+                      backgroundColor: kTeal.withOpacity(0.1),
+                      side: BorderSide.none,
+                    ),
+                  ),
                 if (compareMode)
                   Padding(
                     padding: const EdgeInsets.only(left: 6),
@@ -1801,4 +1901,93 @@ class _SettingsScreenState extends State<SettingsScreen> {
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: kLine)),
         child: child,
       );
+}
+
+
+class SkillPack {
+  final String id;
+  final String name;
+  final String desc;
+  final String prompt;
+  final List<String> prefer;
+  final IconData icon;
+  SkillPack({required this.id, required this.name, required this.desc, required this.prompt, required this.prefer, required this.icon});
+}
+
+class Skills {
+  static IconData iconFor(String n) {
+    switch (n) {
+      case 'translate':
+        return Icons.translate;
+      case 'code':
+        return Icons.code;
+      case 'map':
+        return Icons.map_outlined;
+      case 'edit':
+        return Icons.edit_outlined;
+      case 'school':
+        return Icons.school_outlined;
+      case 'summarize':
+        return Icons.summarize_outlined;
+      default:
+        return Icons.auto_awesome;
+    }
+  }
+
+  static List<SkillPack> parsePacks(String body) {
+    try {
+      final d = jsonDecode(body) as List;
+      return d
+          .map((x) => SkillPack(
+                id: (x['id'] ?? '').toString(),
+                name: (x['name'] ?? '').toString(),
+                desc: (x['desc'] ?? '').toString(),
+                prompt: (x['prompt'] ?? '').toString(),
+                prefer: ((x['prefer'] as List?) ?? []).map((e) => e.toString()).toList(),
+                icon: iconFor((x['icon'] ?? '').toString()),
+              ))
+          .where((x) => x.id.isNotEmpty && x.prompt.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static const rawUrl = 'https://raw.githubusercontent.com/modyzix2-boop/masaedi/main/skills/skills.json';
+
+  static List<SkillPack> builtIn = [
+    SkillPack(id: 'translator', name: 'مترجم', desc: 'ترجمة بين العربي والإنجليزي مع الحفاظ على المعنى والنبرة', icon: Icons.translate, prefer: const ['aya-expanse-32b', 'command-a-translate', 'gpt-oss-120b'], prompt: 'أنت مترجم محترف بين العربية والإنجليزية. ترجم رسائل المستخدم حرفيًا في المعنى مع الحفاظ على النبرة والسياق. لو الرسالة عربي ترجمها إنجليزي، ولو إنجليزي ترجمها عربي فصيح مبسط. ماتضيفش شرح إلا لو اتطلب.'),
+    SkillPack(id: 'coder', name: 'مبرمج', desc: 'مساعد برمجة: كود، تصحيح أخطاء، وشرح بالعربي', icon: Icons.code, prefer: const ['qwen2.5-coder-32b', 'north-mini-code', 'gpt-oss-120b'], prompt: 'أنت مبرمج خبير. اكتب كود نظيف وصحيح مع تعليقات موجزة، واشرح بالعربي البسيط. لو فيه خطأ في كود المستخدم، وضّح السبب والحل. اكتب الكود في بلوكات كود markdown.'),
+    SkillPack(id: 'trip', name: 'مخطط رحلات', desc: 'خطط رحلات يوم بيوم: أماكن، مواصلات، ميزانية', icon: Icons.map_outlined, prefer: const ['gpt-oss-120b', 'llama-3.3-70b-fp8-fast', 'command-a'], prompt: 'أنت مخطط رحلات خبير. اعمل خطة يوم بيوم واقعية تشمل الأماكن والمواصلات والتكلفة التقريبية بالعملة المحلية، واسأل عن الميزانية والمدة لو مش مذكورين. اكتب بالعربي.'),
+    SkillPack(id: 'writer', name: 'كاتب', desc: 'تحسين وكتابة نصوص عربية: رسائل، مقالات، بوستات', icon: Icons.edit_outlined, prefer: const ['llama-3.3-70b-fp8-fast', 'command-r-2', 'gpt-oss-120b'], prompt: 'أنت كاتب عربي محترف. حسّن نصوص المستخدم أو اكتبها من الصفر بأسلوب واضح وجذاب وسليم لغويًا. حافظ على صوت المستخدم ومعناه، واقترح بدائل لو فيه أكتر من اتجاه.'),
+    SkillPack(id: 'tutor', name: 'مدرّس', desc: 'شرح مبسط بأمثلة لأي موضوع، خطوة بخطوة', icon: Icons.school_outlined, prefer: const ['gpt-oss-120b', 'aya-expanse-32b', 'llama-3.3-70b-fp8-fast'], prompt: 'أنت مدرّس صبور بتشرح بالعربي البسيط. قسّم أي موضوع لخطوات صغيرة، استخدم أمثلة من الحياة، واتأكد إن المستخدم فاهم قبل ما تنتقل. شجّع الأسئلة.'),
+    SkillPack(id: 'summarizer', name: 'ملخّص', desc: 'تلخيص النصوص الطويلة في نقاط واضحة', icon: Icons.summarize_outlined, prefer: const ['command-r-2', 'llama-3.3-70b-fp8-fast', 'qwen3.5-9b'], prompt: 'أنت ملخّص محترف. لخّص أي نص يرسله المستخدم في نقاط قصيرة واضحة بالعربي، مع الحفاظ على الأفكار الأساسية والأرقام المهمة. لو النص طويل، رتّب الملخص بعناوين.'),
+  ];
+
+  static List<SkillPack> all = builtIn;
+
+  static bool _loaded = false;
+
+  static Future<void> load() async {
+    if (_loaded) return;
+    _loaded = true;
+    List<SkillPack> packs = [];
+    try {
+      final p = await SharedPreferences.getInstance();
+      final cached = p.getString('skillsCache');
+      if (cached != null) packs = parsePacks(cached);
+    } catch (_) {}
+    try {
+      final r = await http.get(Uri.parse(rawUrl)).timeout(const Duration(seconds: 25));
+      if (r.statusCode == 200) {
+        final fresh = parsePacks(utf8.decode(r.bodyBytes));
+        if (fresh.isNotEmpty) {
+          packs = fresh;
+          final p = await SharedPreferences.getInstance();
+          await p.setString('skillsCache', utf8.decode(r.bodyBytes));
+        }
+      }
+    } catch (_) {}
+    if (packs.isNotEmpty) all = packs;
+  }
 }
