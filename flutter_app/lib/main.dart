@@ -104,6 +104,28 @@ class Api {
     }
   }
 
+  static Future<List<Map<String, dynamic>>> getProviders() async {
+    final r = await http.get(Uri.parse('$kBase/v1/providers'), headers: headers).timeout(const Duration(seconds: 90));
+    if (r.statusCode != 200) throw Exception('providers ${r.statusCode}');
+    final d = jsonDecode(utf8.decode(r.bodyBytes));
+    return (d['providers'] as List).cast<Map<String, dynamic>>();
+  }
+
+  static Future<Map<String, Map<String, String>>> getProviderKeys() async {
+    try {
+      final r = await http.get(Uri.parse('$kBase/v1/client/provider-keys'), headers: headers).timeout(const Duration(seconds: 90));
+      if (r.statusCode != 200) return {};
+      final d = jsonDecode(utf8.decode(r.bodyBytes));
+      final out = <String, Map<String, String>>{};
+      for (final k in (d['providers'] as List)) {
+        out[k['platform'].toString()] = {'key': (k['key'] ?? '').toString(), 'label': (k['label'] ?? '').toString()};
+      }
+      return out;
+    } catch (_) {
+      return {};
+    }
+  }
+
   static Future<Map<String, dynamic>> getUsage() async {
     final r = await http.get(Uri.parse('$kBase/v1/usage'), headers: headers).timeout(const Duration(seconds: 90));
     if (r.statusCode != 200) throw Exception('usage ${r.statusCode}');
@@ -406,6 +428,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
       appBar: AppBar(
         title: Text('أهلاً يا ${Api.name}', style: const TextStyle(fontWeight: FontWeight.w700)),
         actions: [
+          TextButton.icon(
+            icon: const Icon(Icons.hub_outlined, size: 20, color: kTeal),
+            label: const Text('المزودون', style: TextStyle(color: kTeal, fontWeight: FontWeight.w700, fontSize: 13)),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProvidersScreen())),
+          ),
           TextButton.icon(
             icon: const Icon(Icons.insights_outlined, size: 20, color: kTeal),
             label: const Text('لوحة التحكم', style: TextStyle(color: kTeal, fontWeight: FontWeight.w700, fontSize: 13)),
@@ -947,5 +974,192 @@ class _BubbleState extends State<Bubble> {
         ),
       ),
     );
+  }
+}
+
+class ProvidersScreen extends StatefulWidget {
+  const ProvidersScreen({super.key});
+  @override
+  State<ProvidersScreen> createState() => _ProvidersScreenState();
+}
+
+class _ProvidersScreenState extends State<ProvidersScreen> {
+  List<Map<String, dynamic>>? provs;
+  Map<String, int>? counts;
+  Map<String, Map<String, String>> keys = {};
+  String? err;
+  final shown = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    setState(() => err = null);
+    try {
+      final res = await Future.wait([Api.getProviders(), Api.getProviderKeys()]);
+      if (!mounted) return;
+      setState(() {
+        provs = res[0] as List<Map<String, dynamic>>;
+        keys = res[1] as Map<String, Map<String, String>>;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => err = 'السيرفر ممكن يكون بيبدأ، اسحب لتحديث الصفحة بعد ثواني');
+    }
+  }
+
+  ({String label, Color color, IconData icon}) _status(String s) {
+    switch (s) {
+      case 'healthy':
+        return (label: 'شغال', color: const Color(0xFF15803D), icon: Icons.check_circle_outline);
+      case 'rate_limited':
+        return (label: 'محدود مؤقتًا', color: const Color(0xFFB45309), icon: Icons.hourglass_top);
+      case 'invalid':
+        return (label: 'فيه مشكلة', color: const Color(0xFFB3261E), icon: Icons.error_outline);
+      default:
+        return (label: 'لسه متأكدناش', color: Colors.black45, icon: Icons.help_outline);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final healthy = (provs ?? []).where((p) => p['status'] == 'healthy').length;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('المزودون', style: TextStyle(fontWeight: FontWeight.w700)),
+        actions: [IconButton(icon: const Icon(Icons.refresh), tooltip: 'تحديث', onPressed: load)],
+      ),
+      body: RefreshIndicator(
+        color: kTeal,
+        onRefresh: load,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: kTeal.withOpacity(0.07), borderRadius: BorderRadius.circular(14)),
+              child: Row(children: [
+                const Icon(Icons.verified_user_outlined, color: kTeal, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    provs == null ? 'بنحمّل حالة المزودين...' : '$healthy من ${provs!.length} مزودين شغالين دلوقتي — الحالة لايف من السيرفر',
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 12),
+            if (err != null)
+              Padding(padding: const EdgeInsets.all(32), child: Text(err!, textAlign: TextAlign.center))
+            else if (provs == null)
+              const Center(child: Padding(padding: EdgeInsets.all(48), child: PulsingDots()))
+            else
+              ...provs!.map(_provCard),
+            const SizedBox(height: 8),
+            const Text(
+              'المفاتيح دي من حساباتك إنت عند المزودين، محفوظة على السيرفر بتاعك بس. زرار العين بيظهر المفتاح وزرار النسخ بياخده كامل.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.black45, height: 1.6),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _provCard(Map<String, dynamic> p) {
+    final platform = p['platform'].toString();
+    final name = p['name'].toString();
+    final st = _status(p['status'].toString());
+    final k = keys[platform];
+    final hasKey = k != null && (k['key'] ?? '').isNotEmpty;
+    final isShown = shown.contains(platform);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: kLine)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Icon(st.icon, color: st.color, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15.5), textDirection: TextDirection.ltr, textAlign: TextAlign.right),
+              Text(platform, style: const TextStyle(fontSize: 11, color: Colors.black38, fontFamily: 'monospace'), textDirection: TextDirection.ltr, textAlign: TextAlign.right),
+            ]),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: st.color.withOpacity(0.1), borderRadius: BorderRadius.circular(20)),
+            child: Text(st.label, style: TextStyle(color: st.color, fontSize: 12, fontWeight: FontWeight.w700)),
+          ),
+        ]),
+        if (p['status'] == 'rate_limited' && p['resume_at'] != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('بيرجع يشتغل حوالي ${_fmtTime(p['resume_at'].toString())}', style: const TextStyle(fontSize: 12.5, color: Color(0xFFB45309))),
+          ),
+        if (p['status'] == 'invalid' && p['last_error'] != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('آخر خطأ: ${p['last_error']}', style: const TextStyle(fontSize: 12, color: Color(0xFFB3261E)), maxLines: 2, overflow: TextOverflow.ellipsis),
+          ),
+        if (p['requests_remaining_pct'] != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('فاضل تقريبًا ${p['requests_remaining_pct']}% من حصة الطلبات', style: const TextStyle(fontSize: 12.5, color: Colors.black54)),
+          ),
+        const SizedBox(height: 10),
+        if (hasKey)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(color: kBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: kLine)),
+            child: Row(children: [
+              const Icon(Icons.vpn_key_outlined, size: 16, color: kTealDark),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  isShown ? k!['key']! : '••••••••••••••••••••',
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5),
+                  overflow: TextOverflow.ellipsis,
+                  textDirection: TextDirection.ltr,
+                ),
+              ),
+              IconButton(
+                icon: Icon(isShown ? Icons.visibility_off : Icons.visibility, size: 19),
+                tooltip: isShown ? 'إخفاء' : 'إظهار',
+                onPressed: () => setState(() => isShown ? shown.remove(platform) : shown.add(platform)),
+              ),
+              IconButton(
+                icon: const Icon(Icons.copy, size: 19),
+                tooltip: 'نسخ',
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: k!['key']!));
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('مفتاح $name اتنسخ'), duration: const Duration(seconds: 1)));
+                },
+              ),
+            ]),
+          )
+        else
+          const Row(children: [
+            Icon(Icons.lock_open, size: 16, color: Colors.black38),
+            SizedBox(width: 8),
+            Expanded(child: Text('مفيش مفتاح — المزود ده بيشتغل مجانًا من غير حساب', style: TextStyle(fontSize: 12.5, color: Colors.black45))),
+          ]),
+      ]),
+    );
+  }
+
+  String _fmtTime(String iso) {
+    try {
+      final d = DateTime.parse(iso).toLocal();
+      return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return 'قريب';
+    }
   }
 }

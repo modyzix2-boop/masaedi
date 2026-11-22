@@ -1,5 +1,5 @@
 name: build-apk
-on: [workflow_dispatch, push]
+on: [workflow_dispatch]
 concurrency: {group: apk-build, cancel-in-progress: true}
 permissions:
   contents: write
