@@ -31,12 +31,13 @@
 2. ~~Model cards with use-case tags~~ DONE in v1.2.2 (توليد الصور impossible — no image-gen models in catalog).
 3. ~~Compare mode~~ DONE in v1.3.0.
 4. ~~Settings/stats entry: period + all-time tokens~~ DONE in v1.4.0.
-5. Image + voice input.
+5. ~~Image + voice input~~ DONE in v1.5.0 (vision limited by free quota — see note above).
 6. Skills system (system-prompt skill packs).
 7. Search mode.
 - Honest constraint already told to user: real agent execution is not feasible on the free stack; chat models only talk.
 
 ## Shipped since handoff
+- v1.5.0 (2026-11-22): image + voice input. image_picker (gallery/camera, 1024px/80q, data-URL base64), messages with 'img' get OpenAI structured content in the wire, auto-routes to first available visionIds model if the selected one isn't vision. Images are STRIPPED on save (hadImg marker) to keep the GitHub sync file under its 900KB cap. Voice = speech_to_text on-device, ar_EG, writes into the input field (no server involvement). Workflow now adds image_picker+speech_to_text and RECORD_AUDIO+CAMERA permissions. HONEST GAP: free vision capacity is thin — moondream's Cloudflare route rejects the data-URL image format (wants array/binary), qwen2.5-vl-72b hit a ~24h OVH cooldown during smoke test, nemotron-3.5-super-vl routes lack vision. The wire format is correct (request routed, provider rejected on quota/format only) but a real image answer was NOT observed end-to-end. Vision may work when quota resets; the app shows a clear message when no vision model is reachable.
 - v1.4.0 (2026-11-22): settings screen (name edit, key show/copy, logout moved there from app bar, about card) + dashboard all-time stats (كل الطلبات / كل التوكنز). Shim: usage accumulator samples upstream /v1/usage every 5min + 12s after each chat completion, persists positive deltas to sync/<sha>.usage.json via the chat-sync store; GET /v1/client/usage-alltime (401 on bad key). Verified: counter incremented after a real chat, .usage.json present in GitHub sync/.
 - v1.2.2: model picker is now cards with use-case tags (كود/حديث/تحليل الصور/مهام/عربي/أدوات, pattern-based on id in _ChatScreenState.modelTags) + tag filter chips. NO image-gen models exist in the catalog — tag deliberately absent, user told.
 - v1.3.0: compare mode. Toggle in chat app bar (view_column icon), multi-select picker (2-3 models, cap enforced), parallel streams per model, answers grouped by 'grp' key rendered side-by-side >=560dp / stacked below, compare answers marked art:true so they stay OUT of the wire context. Per-model 'الرد الفعلي' kept. Catalog is VOLATILE: available count swung 104 -> 53 within an hour (free providers flap/restart wipes health state); llama-3.2-3b failed once with model_not_found then worked — expect intermittent per-model failures, app already shows a per-card fallback message.
