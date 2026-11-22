@@ -30,13 +30,14 @@
 1. ~~Providers screen~~ DONE in v1.2.1.
 2. ~~Model cards with use-case tags~~ DONE in v1.2.2 (توليد الصور impossible — no image-gen models in catalog).
 3. ~~Compare mode~~ DONE in v1.3.0.
-4. Settings/stats entry: period + all-time tokens (dashboard exists at /v1/usage; make entry obvious — v1.2.0 added a text button already).
+4. ~~Settings/stats entry: period + all-time tokens~~ DONE in v1.4.0.
 5. Image + voice input.
 6. Skills system (system-prompt skill packs).
 7. Search mode.
 - Honest constraint already told to user: real agent execution is not feasible on the free stack; chat models only talk.
 
 ## Shipped since handoff
+- v1.4.0 (2026-11-22): settings screen (name edit, key show/copy, logout moved there from app bar, about card) + dashboard all-time stats (كل الطلبات / كل التوكنز). Shim: usage accumulator samples upstream /v1/usage every 5min + 12s after each chat completion, persists positive deltas to sync/<sha>.usage.json via the chat-sync store; GET /v1/client/usage-alltime (401 on bad key). Verified: counter incremented after a real chat, .usage.json present in GitHub sync/.
 - v1.2.2: model picker is now cards with use-case tags (كود/حديث/تحليل الصور/مهام/عربي/أدوات, pattern-based on id in _ChatScreenState.modelTags) + tag filter chips. NO image-gen models exist in the catalog — tag deliberately absent, user told.
 - v1.3.0: compare mode. Toggle in chat app bar (view_column icon), multi-select picker (2-3 models, cap enforced), parallel streams per model, answers grouped by 'grp' key rendered side-by-side >=560dp / stacked below, compare answers marked art:true so they stay OUT of the wire context. Per-model 'الرد الفعلي' kept. Catalog is VOLATILE: available count swung 104 -> 53 within an hour (free providers flap/restart wipes health state); llama-3.2-3b failed once with model_not_found then worked — expect intermittent per-model failures, app already shows a per-card fallback message.
 - v1.2.1 (2026-11-22): providers screen. Live status from upstream GET /v1/providers (healthy/rate_limited/invalid/unknown, resume_at, last_error, requests_remaining_pct — flips to healthy only after real traffic). Keys from NEW shim endpoint GET /v1/client/provider-keys (reads FREEAPI_CONFIG_JSON env server-side, Bearer = unified key, 401 otherwise; app masks with show/copy). 6 keyed providers (huggingface, groq, openrouter, cohere, cloudflare, google) + 4 keyless (ovh, aihorde, kilo, parallel). Legacy build.yml push trigger disabled (was overwriting v1.0.4 on every push).
