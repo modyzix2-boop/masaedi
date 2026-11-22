@@ -666,6 +666,8 @@ class _ChatScreenState extends State<ChatScreen> {
   String model = 'auto';
   bool sending = false;
   bool loading = true;
+  bool compareMode = false;
+  final Set<String> compareSet = {'llama-3.3-70b-fp8-fast', 'gpt-oss-120b'};
   late String title;
 
   @override
@@ -876,6 +878,112 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
 
+  void openComparePicker() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.75,
+          maxChildSize: 0.95,
+          builder: (_, sc) => Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(children: [
+              const Row(children: [
+                Icon(Icons.view_column_outlined, color: kTeal),
+                SizedBox(width: 8),
+                Expanded(child: Text('اختار من 2 لـ 3 نماذج للمقارنة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700))),
+              ]),
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView.builder(
+                  controller: sc,
+                  itemCount: models.length,
+                  itemBuilder: (_, i) {
+                    final m = models[i];
+                    final sel = compareSet.contains(m.id);
+                    return ListTile(
+                      dense: true,
+                      title: Text(m.id, textDirection: TextDirection.ltr, textAlign: TextAlign.right, style: const TextStyle(fontSize: 13.5, fontFamily: 'monospace')),
+                      trailing: Icon(sel ? Icons.check_box : Icons.check_box_outline_blank, color: sel ? kTeal : Colors.black38, size: 22),
+                      onTap: () {
+                        if (sel) {
+                          if (compareSet.length <= 2) return;
+                          setS(() => compareSet.remove(m.id));
+                          setState(() {});
+                        } else {
+                          if (compareSet.length >= 3) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الحد الأقصى 3 نماذج في المقارنة'), duration: Duration(seconds: 1)));
+                            return;
+                          }
+                          setS(() => compareSet.add(m.id));
+                          setState(() {});
+                        }
+                      },
+                    );
+                  },
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> sendCompare() async {
+    final text = inputC.text.trim();
+    if (text.isEmpty || sending) return;
+    final sel = compareSet.where((id) => models.any((m) => m.id == id)).toList();
+    if (sel.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اختار نموذجين على الأقل من قائمة المقارنة'), duration: Duration(seconds: 2)));
+      return;
+    }
+    inputC.clear();
+    final grp = 'g${DateTime.now().millisecondsSinceEpoch}';
+    setState(() {
+      msgs.add({'r': 'u', 'c': text});
+      for (final id in sel) {
+        msgs.add({'r': 'a', 'c': '', 'model': id, 'grp': grp, 'art': true});
+      }
+      sending = true;
+    });
+    if (title == 'محادثة جديدة' || title == 'محادثة') {
+      title = text.length > 40 ? '${text.substring(0, 40)}…' : text;
+    }
+    _toBottom();
+    final ctxEnd = msgs.length - sel.length;
+    final futures = <Future>[];
+    for (var j = 0; j < sel.length; j++) {
+      final mid = sel[j];
+      final idx = ctxEnd + j;
+      futures.add(() async {
+        final buf = StringBuffer();
+        String? served;
+        try {
+          await for (final part in Api.streamChat(List.of(msgs.sublist(0, ctxEnd)), mid, onServed: (sm) => served = sm)) {
+            buf.write(part);
+            if (mounted) setState(() => msgs[idx] = {'r': 'a', 'c': buf.toString(), 'model': mid, 'grp': grp, 'art': true, 'served': served});
+          }
+          if (buf.isEmpty) throw Exception('empty');
+          _toBottom();
+        } catch (_) {
+          if (mounted && buf.isEmpty) {
+            setState(() => msgs[idx] = {'r': 'a', 'c': 'النموذج ده مجاوبش دلوقتي، جرّب تاني', 'model': mid, 'grp': grp, 'art': true});
+          }
+        }
+      }());
+    }
+    await Future.wait(futures);
+    if (mounted) setState(() => sending = false);
+    try {
+      await Api.putChat(widget.chatId, title, msgs);
+    } catch (_) {}
+  }
+
   Future<void> send() async {
     final text = inputC.text.trim();
     if (text.isEmpty || sending) return;
@@ -912,6 +1020,26 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (_) {}
   }
 
+  List<Map<String, dynamic>> _items() {
+    final out = <Map<String, dynamic>>[];
+    var i = 0;
+    while (i < msgs.length) {
+      final g = msgs[i]['grp'];
+      if (g != null) {
+        final members = <int>[];
+        while (i < msgs.length && msgs[i]['grp'] == g) {
+          members.add(i);
+          i++;
+        }
+        out.add({'grp': g, 'idx': members});
+      } else {
+        out.add({'idx': [i]});
+        i++;
+      }
+    }
+    return out;
+  }
+
   void _toBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (scrollC.hasClients) scrollC.jumpTo(scrollC.position.maxScrollExtent);
@@ -922,7 +1050,16 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     final favs = models.where((m) => favIds.contains(m.id)).toList();
     return Scaffold(
-      appBar: AppBar(title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17))),
+      appBar: AppBar(
+        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.view_column_outlined, color: compareMode ? kTeal : Colors.black45),
+            tooltip: 'وضع المقارنة',
+            onPressed: sending ? null : () => setState(() => compareMode = !compareMode),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           SizedBox(
@@ -931,6 +1068,21 @@ class _ChatScreenState extends State<ChatScreen> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               children: [
+                if (compareMode)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: ActionChip(
+                      avatar: const Icon(Icons.tune, size: 16, color: kTeal),
+                      label: Text('مقارنة (${compareSet.length} نماذج)', style: const TextStyle(fontSize: 13)),
+                      onPressed: sending ? null : openComparePicker,
+                    ),
+                  ),
+                if (compareMode)
+                  ...compareSet.map((id) => Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: Chip(label: Text(modelLabel(id), style: const TextStyle(fontSize: 12.5))),
+                      )),
+                if (!compareMode)
                 ...favs.map((m) => Padding(
                       padding: const EdgeInsets.only(left: 6),
                       child: ChoiceChip(
@@ -941,6 +1093,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         onSelected: sending ? null : (_) => setState(() => model = m.id),
                       ),
                     )),
+                if (!compareMode)
                 Padding(
                   padding: const EdgeInsets.only(left: 6),
                   child: ActionChip(
@@ -958,8 +1111,16 @@ class _ChatScreenState extends State<ChatScreen> {
                 : ListView.builder(
                     controller: scrollC,
                     padding: const EdgeInsets.all(12),
-                    itemCount: msgs.length,
-                    itemBuilder: (_, i) => Bubble(key: ValueKey('$i-${msgs[i].hashCode}'), m: msgs[i], streaming: sending && i == msgs.length - 1),
+                    itemCount: _items().length,
+                    itemBuilder: (_, i) {
+                      final it = _items()[i];
+                      final idxs = (it['idx'] as List).cast<int>();
+                      if (idxs.length == 1) {
+                        final ix = idxs[0];
+                        return Bubble(key: ValueKey('$ix-${msgs[ix].hashCode}'), m: msgs[ix], streaming: sending && ix == msgs.length - 1);
+                      }
+                      return CompareRow(key: ValueKey(it['grp'].toString()), members: idxs.map((x) => msgs[x]).toList(), streaming: sending);
+                    },
                   ),
           ),
           SafeArea(
@@ -980,7 +1141,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                       ),
-                      onSubmitted: (_) => send(),
+                      onSubmitted: (_) => compareMode ? sendCompare() : send(),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -993,7 +1154,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                     child: IconButton(
                       icon: sending ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.send, color: Colors.white),
-                      onPressed: sending ? null : send,
+                      onPressed: sending ? null : (compareMode ? sendCompare : send),
                     ),
                   ),
                 ],
@@ -1279,5 +1440,66 @@ class _ProvidersScreenState extends State<ProvidersScreen> {
     } catch (_) {
       return 'قريب';
     }
+  }
+}
+
+
+class CompareRow extends StatelessWidget {
+  final List<Map<String, dynamic>> members;
+  final bool streaming;
+  const CompareRow({super.key, required this.members, this.streaming = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final wide = MediaQuery.of(context).size.width >= 560;
+    final cards = members.map((m) => _cmpCard(context, m)).toList();
+    if (!wide) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: cards);
+    }
+    final row = <Widget>[];
+    for (var i = 0; i < cards.length; i++) {
+      if (i > 0) row.add(const SizedBox(width: 8));
+      row.add(Expanded(child: cards[i]));
+    }
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: row);
+  }
+
+  Widget _cmpCard(BuildContext context, Map<String, dynamic> m) {
+    final text = (m['c'] ?? '').toString();
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: kLine)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        Row(children: [
+          const Icon(Icons.smart_toy_outlined, size: 15, color: kTeal),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(modelLabel(m['model'].toString()),
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: kTealDark), overflow: TextOverflow.ellipsis, textDirection: TextDirection.ltr, textAlign: TextAlign.right),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        if (text.isEmpty && streaming)
+          const Padding(padding: EdgeInsets.all(10), child: Center(child: PulsingDots(size: 7)))
+        else if (text.isNotEmpty)
+          MarkdownBody(
+            data: text,
+            softLineBreak: true,
+            styleSheet: MarkdownStyleSheet(
+              p: const TextStyle(color: kInk, fontSize: 14, height: 1.55, fontFamily: 'Cairo'),
+              strong: const TextStyle(fontWeight: FontWeight.w700, color: kInk),
+              listBullet: const TextStyle(color: kInk, fontSize: 14, height: 1.55),
+              code: TextStyle(fontFamily: 'monospace', fontSize: 12, backgroundColor: kTeal.withOpacity(0.08), color: kTealDark),
+              codeblockDecoration: BoxDecoration(color: const Color(0xFF262625), borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        if (text.isNotEmpty && m['served'] != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text('الرد الفعلي: ${m['served']}', style: const TextStyle(fontSize: 9.5, color: Colors.black38), textDirection: TextDirection.ltr, textAlign: TextAlign.left),
+          ),
+      ]),
+    );
   }
 }
