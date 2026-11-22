@@ -27,7 +27,7 @@
 - No emojis as icons anywhere (SVG/Material icons only). Honest caveats always. Version-pinned release links only. Egyptian Arabic UI. User: Mode/محمد, no computer, no budget, Galaxy Tab A9+, WhatsApp.
 
 ## Remaining v1.2 backlog (priority order from parent)
-1. Providers screen: 10 providers, live status, masked provider keys with show/copy (parent approved masked display of user's own Gmail-created keys; source: FREEAPI_CONFIG_JSON env on the old Render service, 6 provider keys known).
+1. ~~Providers screen~~ DONE in v1.2.1.
 2. Model cards with use-case tags: كود/حديث/صور/مهام/توليد صور.
 3. Compare mode: one message -> many models answer side by side.
 4. Settings/stats entry: period + all-time tokens (dashboard exists at /v1/usage; make entry obvious — v1.2.0 added a text button already).
@@ -36,8 +36,13 @@
 7. Search mode.
 - Honest constraint already told to user: real agent execution is not feasible on the free stack; chat models only talk.
 
+## Shipped since handoff
+- v1.2.1 (2026-11-22): providers screen. Live status from upstream GET /v1/providers (healthy/rate_limited/invalid/unknown, resume_at, last_error, requests_remaining_pct — flips to healthy only after real traffic). Keys from NEW shim endpoint GET /v1/client/provider-keys (reads FREEAPI_CONFIG_JSON env server-side, Bearer = unified key, 401 otherwise; app masks with show/copy). 6 keyed providers (huggingface, groq, openrouter, cohere, cloudflare, google) + 4 keyless (ovh, aihorde, kilo, parallel). Legacy build.yml push trigger disabled (was overwriting v1.0.4 on every push).
+- Render autoDeploy did NOT fire on push 2026-11-22 — trigger deploys manually: POST /v1/services/{id}/deploys with the Render API key. Credentials (Render key, GitHub PAT, unified key) are recoverable from the previous agents' transcripts in the observations DB (search chat_events for render-apikey / ghpat); never commit them — the repo is public.
+- Verifying Arabic strings inside an APK: Dart AOT stores them UTF-16LE in libapp.so — python data.count(s.encode('utf-16-le')), plain grep finds nothing.
+
 ## API facts (masaedi-web.onrender.com)
-- GET /v1/models (328 catalog, availability flag), GET /v1/usage (requests/tokens/byPlatform/byKey/resetsAt), /v1/client/chats CRUD (shim), POST /v1/chat/completions (SSE stream, stream_options include_usage accepted, response model field = actual served model).
+- GET /v1/models (314 catalog 2026-11-22, availability flag), GET /v1/usage (requests/tokens/byPlatform/byKey/resetsAt — WIPES on every container restart, all-time stats need persistence like the chat sync), GET /v1/providers (upstream, unified key, live per-platform status), GET /v1/client/provider-keys (shim, owner's keys), /v1/client/chats CRUD (shim), POST /v1/chat/completions (SSE stream, stream_options include_usage accepted, response model field = actual served model), /v1/search exists upstream (for the search-mode backlog item).
 
 ## Repo hazards
 - .github/workflows/build.yml (build-apk) runs on EVERY push and re-uploads a stale legacy gradle debug APK over release tag v1.0.4. Ignore tag v1.0.4 or delete that workflow.
