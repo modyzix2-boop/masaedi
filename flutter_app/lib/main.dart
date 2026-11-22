@@ -126,6 +126,16 @@ class Api {
     }
   }
 
+  static Future<Map<String, dynamic>?> getAllTimeUsage() async {
+    try {
+      final r = await http.get(Uri.parse('$kBase/v1/client/usage-alltime'), headers: headers).timeout(const Duration(seconds: 90));
+      if (r.statusCode != 200) return null;
+      return jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<Map<String, dynamic>> getUsage() async {
     final r = await http.get(Uri.parse('$kBase/v1/usage'), headers: headers).timeout(const Duration(seconds: 90));
     if (r.statusCode != 200) throw Exception('usage ${r.statusCode}');
@@ -439,13 +449,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DashboardScreen())),
           ),
           IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'خروج',
-            onPressed: () async {
-              final p = await SharedPreferences.getInstance();
-              await p.remove('key');
-              widget.onLogout();
-            },
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'الإعدادات',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => SettingsScreen(onLogout: widget.onLogout))),
           )
         ],
       ),
@@ -513,6 +519,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, dynamic>? usage;
+  Map<String, dynamic>? allTime;
   String? err;
   bool showKey = false;
 
@@ -523,6 +530,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (mounted) setState(() => usage = u);
     }).catchError((_) {
       if (mounted) setState(() => err = 'مش قادر أوصل للسيرفر دلوقتي');
+    });
+    Api.getAllTimeUsage().then((a) {
+      if (mounted && a != null) setState(() => allTime = a);
     });
   }
 
@@ -570,6 +580,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const SizedBox(width: 12),
               Expanded(child: _statCard('توكنز الشهر', _fmt(usage!['tokens'] ?? 0), Icons.data_usage)),
             ]),
+            if (allTime != null) ...[
+              const SizedBox(height: 14),
+              Row(children: [
+                Expanded(child: _statCard('كل الطلبات', '${allTime!['requests'] ?? 0}', Icons.all_inclusive)),
+                const SizedBox(width: 12),
+                Expanded(child: _statCard('كل التوكنز', _fmt(allTime!['tokens'] ?? 0), Icons.stacked_line_chart)),
+              ]),
+              const SizedBox(height: 6),
+              const Text('الإجمالي الكلي بيتجمّع على السيرفر وبييفضل حتى لو السيرفر اتريستارت', textAlign: TextAlign.center, style: TextStyle(fontSize: 11.5, color: Colors.black38)),
+            ],
             const SizedBox(height: 14),
             _card(child: Row(children: [
               const Icon(Icons.event_repeat, color: kTeal, size: 20),
@@ -1502,4 +1522,122 @@ class CompareRow extends StatelessWidget {
       ]),
     );
   }
+}
+
+
+class SettingsScreen extends StatefulWidget {
+  final VoidCallback onLogout;
+  const SettingsScreen({super.key, required this.onLogout});
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  late final TextEditingController nameC;
+  bool showKey = false;
+
+  @override
+  void initState() {
+    super.initState();
+    nameC = TextEditingController(text: Api.name);
+  }
+
+  @override
+  void dispose() {
+    nameC.dispose();
+    super.dispose();
+  }
+
+  Future<void> saveName() async {
+    final n = nameC.text.trim();
+    if (n.isEmpty) return;
+    final p = await SharedPreferences.getInstance();
+    await p.setString('name', n);
+    Api.name = n;
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('الاسم اتحفظ'), duration: Duration(seconds: 1)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('الإعدادات', style: TextStyle(fontWeight: FontWeight.w700))),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Row(children: [Icon(Icons.person_outline, color: kTeal, size: 20), SizedBox(width: 8), Text('اسمك', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16))]),
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: nameC,
+                  textAlign: TextAlign.right,
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: kBg,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: saveName,
+                style: FilledButton.styleFrom(backgroundColor: kTeal, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                child: const Text('حفظ'),
+              ),
+            ]),
+          ])),
+          const SizedBox(height: 14),
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Row(children: [Icon(Icons.key, color: kTeal, size: 20), SizedBox(width: 8), Text('مفتاح التشغيل', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16))]),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(color: kBg, borderRadius: BorderRadius.circular(10), border: Border.all(color: kLine)),
+              child: Row(children: [
+                Expanded(
+                  child: Text(showKey ? Api.key : '••••••••••••••••••••••••••',
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 13), overflow: TextOverflow.ellipsis, textDirection: TextDirection.ltr),
+                ),
+                IconButton(icon: Icon(showKey ? Icons.visibility_off : Icons.visibility, size: 20), onPressed: () => setState(() => showKey = !showKey)),
+                IconButton(
+                  icon: const Icon(Icons.copy, size: 20),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: Api.key));
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('المفتاح اتنسخ'), duration: Duration(seconds: 1)));
+                  },
+                ),
+              ]),
+            ),
+          ])),
+          const SizedBox(height: 14),
+          _card(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Row(children: [Icon(Icons.info_outline, color: kTeal, size: 20), SizedBox(width: 8), Text('عن التطبيق', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16))]),
+            const SizedBox(height: 8),
+            const Text('مساعدي — نسخة 1.4.0', style: TextStyle(color: Colors.black54)),
+            const SizedBox(height: 4),
+            const Text('محادثاتك وبياناتك على السيرفر الخاص بيك، والمفاتيح متخزنة على جهازك بس.', style: TextStyle(fontSize: 12.5, color: Colors.black45, height: 1.6)),
+          ])),
+          const SizedBox(height: 20),
+          TextButton.icon(
+            icon: const Icon(Icons.logout, color: Color(0xFFB3261E)),
+            label: const Text('تسجيل الخروج', style: TextStyle(color: Color(0xFFB3261E), fontWeight: FontWeight.w700)),
+            onPressed: () async {
+              final p = await SharedPreferences.getInstance();
+              await p.remove('key');
+              widget.onLogout();
+              if (context.mounted) Navigator.of(context).popUntil((r) => r.isFirst);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _card({required Widget child}) => Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: kLine)),
+        child: child,
+      );
 }
