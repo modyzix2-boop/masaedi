@@ -27,16 +27,16 @@ jobs:
       - name: add packages (latest compatible)
         run: |
           cd flutter_app
-          flutter pub add flutter_markdown_plus image_picker speech_to_text
+          flutter pub add flutter_markdown_plus image_picker speech_to_text url_launcher
       - name: build release apk
         run: |
           cd flutter_app
           flutter pub get
           flutter build apk --release --split-per-abi
-      - run: cp flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk masaedi-native-v1.6.0.apk
+      - run: cp flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk masaedi-native-v1.7.0.apk
       - uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: native-v1.6.0
-          name: "مساعدي ناتيف v1.6.0"
-          files: masaedi-native-v1.6.0.apk
+          tag_name: native-v1.7.0
+          name: "مساعدي ناتيف v1.7.0"
+          files: masaedi-native-v1.7.0.apk

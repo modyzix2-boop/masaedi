@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const String kBase = 'https://masaedi-web.onrender.com';
 const Color kTeal = Color(0xFF0D9488);
@@ -126,6 +127,15 @@ class Api {
     } catch (_) {
       return {};
     }
+  }
+
+  static Future<List<Map<String, dynamic>>> search(String q) async {
+    final r = await http
+        .post(Uri.parse('$kBase/v1/search'), headers: headers, body: jsonEncode({'query': q, 'maxResults': 5}))
+        .timeout(const Duration(seconds: 90));
+    if (r.statusCode != 200) throw Exception('search ${r.statusCode}');
+    final d = jsonDecode(utf8.decode(r.bodyBytes));
+    return ((d['results'] as List?) ?? []).cast<Map<String, dynamic>>();
   }
 
   static Future<Map<String, dynamic>?> getAllTimeUsage() async {
@@ -710,6 +720,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool compareMode = false;
   final Set<String> compareSet = {'llama-3.3-70b-fp8-fast', 'gpt-oss-120b'};
   SkillPack? activeSkill;
+  bool searchMode = false;
   String? attachedImg;
   final picker = ImagePicker();
   final speech = SpeechToText();
@@ -933,6 +944,78 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+
+  Future<void> sendSearch() async {
+    final text = inputC.text.trim();
+    if (text.isEmpty || sending) return;
+    if (attachedImg != null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('البحث مش بيدعم صور، ابعت الصورة في وضع عادي'), duration: Duration(seconds: 2)));
+      return;
+    }
+    inputC.clear();
+    setState(() {
+      msgs.add({'r': 'u', 'c': text});
+      msgs.add({'r': 'a', 'c': ''});
+      sending = true;
+    });
+    if (title == 'محادثة جديدة' || title == 'محادثة') {
+      title = text.length > 40 ? '${text.substring(0, 40)}…' : text;
+    }
+    _toBottom();
+    final aiIdx = msgs.length - 1;
+    List<Map<String, dynamic>> results = [];
+    try {
+      results = await Api.search(text);
+    } catch (_) {}
+    if (results.isEmpty) {
+      if (mounted) {
+        setState(() {
+          msgs[aiIdx] = {'r': 'a', 'c': 'البحث مش شغال دلوقتي، جرّب تاني بعد شوية.', 'model': 'search'};
+          sending = false;
+        });
+      }
+      return;
+    }
+    final ctxBuf = StringBuffer('نتائج البحث من الويب عن سؤال المستخدم:\n');
+    for (var i = 0; i < results.length; i++) {
+      final r = results[i];
+      var content = (r['content'] ?? '').toString();
+      if (content.length > 600) content = content.substring(0, 600);
+      ctxBuf.writeln('${i + 1}. ${r['title']}\n${r['url']}\n$content\n');
+    }
+    final sources = results.map((r) => {'t': (r['title'] ?? '').toString(), 'u': (r['url'] ?? '').toString()}).toList();
+    final wireMsgs = List<Map<String, dynamic>>.from(msgs.sublist(0, msgs.length - 2))
+      ..add({'r': 'u', 'c': '$text\n\n$ctxBuf'});
+    final buf = StringBuffer();
+    String? served;
+    try {
+      await for (final part in Api.streamChat(wireMsgs, model,
+          onServed: (sm) => served = sm, system: 'أنت مساعد بيجاوب بالعربي بناءً على نتائج بحث الويب المرفقة في آخر رسالة. جاوب على سؤال المستخدم من النتائج، ولو النتائج مش كافية قول ده بصراحة. ماتذكرش إن فيه "نتائج مرفقة"، جاوب طبيعي.')) {
+        buf.write(part);
+        if (mounted) {
+          setState(() => msgs[aiIdx] = {'r': 'a', 'c': buf.toString(), 'model': model, 'served': served, 'sources': sources});
+          _toBottom();
+        }
+      }
+      if (buf.isEmpty) throw Exception('فاضي');
+    } catch (_) {
+      if (mounted && buf.isEmpty) {
+        setState(() => msgs[aiIdx] = {'r': 'a', 'c': 'حصل خطأ في الاتصال بعد البحث، جرّب تاني', 'model': model, 'sources': sources});
+      }
+    }
+    if (mounted) setState(() => sending = false);
+    try {
+      final toSave = msgs.map((m) {
+        final c = Map<String, dynamic>.from(m);
+        if (c['img'] is String) {
+          c.remove('img');
+          c['hadImg'] = true;
+        }
+        return c;
+      }).toList();
+      await Api.putChat(widget.chatId, title, toSave, skill: activeSkill?.id ?? '');
+    } catch (_) {}
+  }
 
   void openSkills() {
     showModalBottomSheet(
@@ -1273,6 +1356,18 @@ class _ChatScreenState extends State<ChatScreen> {
         title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17)),
         actions: [
           IconButton(
+            icon: Icon(Icons.travel_explore, color: searchMode ? kTeal : Colors.black45),
+            tooltip: 'بحث الويب',
+            onPressed: sending
+                ? null
+                : () {
+                    setState(() => searchMode = !searchMode);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(searchMode ? 'بحث الويب شغال: هيدور على النت ويجاوب منه' : 'بحث الويب اتقفل'),
+                        duration: const Duration(seconds: 2)));
+                  },
+          ),
+          IconButton(
             icon: Icon(Icons.psychology_outlined, color: activeSkill != null ? kTeal : Colors.black45),
             tooltip: 'المهارات',
             onPressed: sending ? null : openSkills,
@@ -1394,13 +1489,13 @@ class _ChatScreenState extends State<ChatScreen> {
                       maxLines: 4,
                       minLines: 1,
                       decoration: InputDecoration(
-                        hintText: 'اكتب رسالتك هنا...',
+                        hintText: searchMode ? 'اكتب اللي عايز تبحث عنه...' : 'اكتب رسالتك هنا...',
                         filled: true,
                         fillColor: Colors.white,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                       ),
-                      onSubmitted: (_) => compareMode ? sendCompare() : send(),
+                      onSubmitted: (_) => compareMode ? sendCompare() : (searchMode ? sendSearch() : send()),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -1413,7 +1508,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                     child: IconButton(
                       icon: sending ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.send, color: Colors.white),
-                      onPressed: sending ? null : (compareMode ? sendCompare : send),
+                      onPressed: sending ? null : (compareMode ? sendCompare : (searchMode ? sendSearch : send)),
                     ),
                   ),
                 ],
@@ -1516,6 +1611,33 @@ class _BubbleState extends State<Bubble> {
                       codeblockDecoration: BoxDecoration(color: const Color(0xFF262625), borderRadius: BorderRadius.circular(10)),
                       blockquoteDecoration: BoxDecoration(border: Border(right: BorderSide(color: kTeal.withOpacity(0.4), width: 3))),
                       horizontalRuleDecoration: const BoxDecoration(border: Border(top: BorderSide(color: kLine))),
+                    ),
+                  ),
+                if (!isUser && widget.m['sources'] is List && (widget.m['sources'] as List).isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('المصادر:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: Colors.black45)),
+                        ...(widget.m['sources'] as List).map((s) => InkWell(
+                              onTap: () {
+                                final u = (s['u'] ?? '').toString();
+                                if (u.isNotEmpty) launchUrl(Uri.parse(u), mode: LaunchMode.externalApplication);
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 3),
+                                child: Row(children: [
+                                  const Icon(Icons.open_in_new, size: 13, color: kTealDark),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text((s['t'] ?? '').toString(),
+                                        maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11.5, color: kTealDark)),
+                                  ),
+                                ]),
+                              ),
+                            )),
+                      ],
                     ),
                   ),
                 if (!isUser && text.isNotEmpty && (widget.m['served'] != null || widget.m['model'] != null))
