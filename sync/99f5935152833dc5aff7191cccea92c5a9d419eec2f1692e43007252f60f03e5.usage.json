@@ -1,1 +1,1 @@
-{"requests":3,"tokens":117,"byPlatform":{"cloudflare":{"requests":2,"tokens":110},"parallel":{"requests":1,"tokens":7}},"last":{"requests":2,"tokens":74,"byPlatform":{"cloudflare":{"requests":1,"tokens":67},"parallel":{"requests":1,"tokens":7}}},"since":"2026-11-22T05:38:21.766Z"}
+{"requests":5,"tokens":1927,"byPlatform":{"cloudflare":{"requests":3,"tokens":1916},"parallel":{"requests":2,"tokens":11}},"last":{"requests":4,"tokens":1884,"byPlatform":{"cloudflare":{"requests":2,"tokens":1873},"parallel":{"requests":2,"tokens":11}}},"since":"2026-11-22T05:38:21.766Z"}
